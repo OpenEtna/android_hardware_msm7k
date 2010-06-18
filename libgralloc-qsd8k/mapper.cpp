@@ -234,6 +234,7 @@ int gralloc_lock(gralloc_module_t const* module,
         hnd->writeOwner = gettid();
     }
 
+#ifndef BOARD_NO_CACHED_BUFFERS
     // If this is a sw write and is not a framebuffer, flag it for flushing at unlock
     if ( (usage & GRALLOC_USAGE_SW_WRITE_MASK) &&
              !(hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER)) {
@@ -242,6 +243,7 @@ int gralloc_lock(gralloc_module_t const* module,
     else {
         hnd->swWrite = 0;
     }
+#endif
 
     if (usage & (GRALLOC_USAGE_SW_READ_MASK | GRALLOC_USAGE_SW_WRITE_MASK)) {
         if (!(current_value & private_handle_t::LOCK_STATE_MAPPED)) {
@@ -294,11 +296,13 @@ int gralloc_unlock(gralloc_module_t const* module,
     } while (android_atomic_cmpxchg(current_value, new_value, 
             (volatile int32_t*)&hnd->lockState));
 
+#ifndef BOARD_NO_CACHED_BUFFERS
     // If this was locked for a software write, send an ioctl to flush the cache
     if ( hnd->swWrite == 1) {
         struct pmem_region sub = { hnd->offset, hnd->size };
         ioctl( hnd->fd, PMEM_CACHE_FLUSH,  &sub);
     }
+#endif
 
     return 0;
 }
