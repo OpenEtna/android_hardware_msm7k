@@ -48,41 +48,50 @@ static int g_wimax = 0;
 static int g_caps = 0;
 static int g_func = 0;
 
+/* this can be read from /sys/class/backlight/adam-bl/max_brightness,
+ * but its a constant (see kernel/drivers/video/backlight/bl_bd6083.c) */
+static int g_maxLCDbrightness = 99;
+
+
 char const*const TRACKBALL_FILE
-        = "/sys/class/leds/jogball-backlight/brightness";
+        = 0;
 
 char const*const RED_LED_FILE
-        = "/sys/class/leds/red/brightness";
+        = 0;
 
 char const*const GREEN_LED_FILE
-        = "/sys/class/leds/green/brightness";
+        = 0;
 
 char const*const BLUE_LED_FILE
-        = "/sys/class/leds/blue/brightness";
+        = 0;
 
 char const*const AMBER_LED_FILE
-        = "/sys/class/leds/amber/brightness";
+        = 0;
 
 char const*const LCD_FILE
-        = "/sys/class/leds/lcd-backlight/brightness";
+        = "/sys/class/backlight/adam-bl/brightness";
+
+char const*const LCD_ALCMODE_FILE
+        = "/sys/class/backlight/adam-bl/alc_mode";
 
 char const*const RED_FREQ_FILE
-        = "/sys/class/leds/red/device/grpfreq";
+        = 0;
 
 char const*const RED_PWM_FILE
-        = "/sys/class/leds/red/device/grppwm";
+        = 0;
 
 char const*const RED_BLINK_FILE
-        = "/sys/class/leds/red/device/blink";
+        = 0;
 
 char const*const AMBER_BLINK_FILE
-        = "/sys/class/leds/amber/blink";
+        = 0;
 
 char const*const KEYBOARD_FILE
-        = "/sys/class/leds/keyboard-backlight/brightness";
+        = "/sys/devices/platform/android-keyled/enable";
 
+/* the 'home' and 'back' soft buttons */
 char const*const BUTTON_FILE
-        = "/sys/class/leds/button-backlight/brightness";
+        = "/sys/devices/platform/android-keyled/setting";
 
 char const*const CAPS_FILE
         = "/sys/class/leds/caps/brightness";
@@ -97,6 +106,11 @@ char const*const WIMAX_FILE
 /**
  * device methods
  */
+
+/** min of int a, b */
+static inline int min(int a, int b) {
+    return (a<b) ? a : b;
+}
 
 void init_globals(void)
 {
@@ -174,6 +188,7 @@ set_light_backlight(struct light_device_t* dev,
     int err = 0;
     int brightness = rgb_to_brightness(state);
     pthread_mutex_lock(&g_lock);
+    brightness = brightness * g_maxLCDbrightness / 255;
     g_backlight = brightness;
     err = write_int(LCD_FILE, brightness);
     if (g_haveTrackballLight) {
@@ -392,6 +407,14 @@ set_light_attention(struct light_device_t* dev,
     return 0;
 }
 
+static int
+set_alc_mode_backlight(int mode)
+{
+    pthread_mutex_lock(&g_lock);
+    int ret = write_int(LCD_ALCMODE_FILE, mode);
+    pthread_mutex_unlock(&g_lock);
+    return ret;
+}
 
 /** Close the lights device */
 static int
@@ -417,32 +440,17 @@ static int open_lights(const struct hw_module_t* module, char const* name,
     int (*set_light)(struct light_device_t* dev,
             struct light_state_t const* state);
 
+    int (*set_als_mode)(int) = 0;
+
     if (0 == strcmp(LIGHT_ID_BACKLIGHT, name)) {
         set_light = set_light_backlight;
+        set_als_mode = set_alc_mode_backlight;
     }
     else if (0 == strcmp(LIGHT_ID_KEYBOARD, name)) {
         set_light = set_light_keyboard;
     }
     else if (0 == strcmp(LIGHT_ID_BUTTONS, name)) {
         set_light = set_light_buttons;
-    }
-    else if (0 == strcmp(LIGHT_ID_BATTERY, name)) {
-        set_light = set_light_battery;
-    }
-    else if (0 == strcmp(LIGHT_ID_NOTIFICATIONS, name)) {
-        set_light = set_light_notifications;
-    }
-    else if (0 == strcmp(LIGHT_ID_ATTENTION, name)) {
-        set_light = set_light_attention;
-    }
-    else if (0 == strcmp(LIGHT_ID_CAPS, name)) {
-        set_light = set_light_caps;
-    }
-    else if (0 == strcmp(LIGHT_ID_FUNC, name)) {
-        set_light = set_light_func;
-    }
-    else if (0 == strcmp(LIGHT_ID_WIMAX, name)) {
-        set_light = set_light_wimax;
     }
     else {
         return -EINVAL;
@@ -458,6 +466,7 @@ static int open_lights(const struct hw_module_t* module, char const* name,
     dev->common.module = (struct hw_module_t*)module;
     dev->common.close = (int (*)(struct hw_device_t*))close_lights;
     dev->set_light = set_light;
+    dev->set_als_mode = set_als_mode;
 
     *device = (struct hw_device_t*)dev;
     return 0;
