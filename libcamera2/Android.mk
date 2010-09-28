@@ -18,13 +18,13 @@ LOCAL_CFLAGS:= -DDLOPEN_LIBMMCAMERA=$(DLOPEN_LIBMMCAMERA)
 LOCAL_C_INCLUDES+= \
 	vendor/qcom/proprietary/mm-camera/common \
 	vendor/qcom/proprietary/mm-camera/apps/appslib \
-	vendor/qcom/proprietary/mm-camera/jpeg \
+	external/jpeg \
 	vendor/qcom/proprietary/mm-camera/jpeg/inc
 
 LOCAL_SHARED_LIBRARIES:= libbinder libutils libcamera_client liblog
 
 ifneq ($(DLOPEN_LIBMMCAMERA),1)
-LOCAL_SHARED_LIBRARIES+= liboemcamera
+LOCAL_SHARED_LIBRARIES+= libmmcamera libmm-qcamera-tgt
 else
 LOCAL_SHARED_LIBRARIES+= libdl
 endif
