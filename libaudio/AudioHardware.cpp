@@ -42,6 +42,12 @@ static void * acoustic;
 const uint32_t AudioHardware::inputSamplingRates[] = {
         8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000
 };
+
+static int msm72xx_enable_audpp(uint16_t enable_mask, uint32_t device) {
+  return -EINVAL;
+}
+
+
 // ----------------------------------------------------------------------------
 
 AudioHardware::AudioHardware() :
@@ -63,75 +69,74 @@ AudioHardware::AudioHardware() :
     SND_DEVICE_BT_EC_OFF(-1)
 {
 
-    int (*snd_get_num)();
-    int (*snd_get_endpoint)(int, msm_snd_endpoint *);
-    int (*set_acoustic_parameters)();
-
-    struct msm_snd_endpoint *ept;
-
-    acoustic = ::dlopen("/system/lib/libhtc_acoustic.so", RTLD_NOW);
-    if (acoustic == NULL ) {
-        LOGE("Could not open libhtc_acoustic.so");
-        /* this is not really an error on non-htc devices... */
-        mNumSndEndpoints = 0;
-        mInit = true;
-        return;
-    }
-
-    set_acoustic_parameters = (int (*)(void))::dlsym(acoustic, "set_acoustic_parameters");
-    if ((*set_acoustic_parameters) == 0 ) {
-        LOGE("Could not open set_acoustic_parameters()");
-        return;
-    }
-
-    int rc = set_acoustic_parameters();
-    if (rc < 0) {
-        LOGE("Could not set acoustic parameters to share memory: %d", rc);
-//        return;
-    }
-
-    snd_get_num = (int (*)(void))::dlsym(acoustic, "snd_get_num_endpoints");
-    if ((*snd_get_num) == 0 ) {
-        LOGE("Could not open snd_get_num()");
-//        return;
-    }
-
-    mNumSndEndpoints = snd_get_num();
-    LOGD("mNumSndEndpoints = %d", mNumSndEndpoints);
-    mSndEndpoints = new msm_snd_endpoint[mNumSndEndpoints];
-    mInit = true;
-    LOGV("constructed %d SND endpoints)", mNumSndEndpoints);
-    ept = mSndEndpoints;
-    snd_get_endpoint = (int (*)(int, msm_snd_endpoint *))::dlsym(acoustic, "snd_get_endpoint");
-    if ((*snd_get_endpoint) == 0 ) {
-        LOGE("Could not open snd_get_endpoint()");
-        return;
-    }
-
-    for (int cnt = 0; cnt < mNumSndEndpoints; cnt++, ept++) {
-        ept->id = cnt;
-        snd_get_endpoint(cnt, ept);
-#define CHECK_FOR(desc) \
-        if (!strcmp(ept->name, #desc)) { \
-            SND_DEVICE_##desc = ept->id; \
-            LOGD("BT MATCH " #desc); \
-        } else
-        CHECK_FOR(CURRENT)
-        CHECK_FOR(HANDSET)
-        CHECK_FOR(SPEAKER)
-        CHECK_FOR(BT)
-        CHECK_FOR(BT_EC_OFF)
-        CHECK_FOR(HEADSET)
-        CHECK_FOR(CARKIT)
-        CHECK_FOR(TTY_FULL)
-        CHECK_FOR(TTY_VCO)
-        CHECK_FOR(TTY_HCO)
-        CHECK_FOR(NO_MIC_HEADSET)
-        CHECK_FOR(FM_HEADSET)
-        CHECK_FOR(FM_SPEAKER)
-        CHECK_FOR(HEADSET_AND_SPEAKER) {}
+    int m7xsnddriverfd = open("/dev/msm_snd", O_RDWR);
+    if (m7xsnddriverfd >= 0) {
+        int rc = ioctl(m7xsnddriverfd, SND_GET_NUM_ENDPOINTS, &mNumSndEndpoints);
+        if (rc >= 0) {
+            mSndEndpoints = new msm_snd_endpoint[mNumSndEndpoints];
+            mInit = true;
+            LOGV("constructed (%d SND endpoints)", rc);
+            struct msm_snd_endpoint *ept = mSndEndpoints;
+            for (int cnt = 0; cnt < mNumSndEndpoints; cnt++, ept++) {
+                ept->id = cnt;
+                ioctl(m7xsnddriverfd, SND_GET_ENDPOINT, ept);
+                LOGV("cnt = %d ept->name = %s ept->id = %d\n", cnt, ept->name, ept->id);
+#define CHECK_FOR(desc) if (!strcmp(ept->name, #desc)) SND_DEVICE_##desc = ept->id;
+                CHECK_FOR(CURRENT);
+                CHECK_FOR(HANDSET);
+                CHECK_FOR(SPEAKER);
+                CHECK_FOR(BT);
+                CHECK_FOR(BT_EC_OFF);
+                CHECK_FOR(HEADSET);
+                CHECK_FOR(HEADSET_AND_SPEAKER);
 #undef CHECK_FOR
+            }
+        }
+        else LOGE("Could not retrieve number of MSM SND endpoints.");
+#if 0
+        int AUTO_VOLUME_ENABLED = 1; // setting enabled as default
+
+        static const char *const path = "/system/etc/AutoVolumeControl.txt";
+        int txtfd;
+        struct stat st;
+        char *read_buf;
+
+        txtfd = open(path, O_RDONLY);
+        if (txtfd < 0) {
+            LOGE("failed to open AUTO_VOLUME_CONTROL %s: %s (%d)",
+                  path, strerror(errno), errno);
+        }
+        else {
+            if (fstat(txtfd, &st) < 0) {
+                LOGE("failed to stat %s: %s (%d)",
+                      path, strerror(errno), errno);
+                close(txtfd);
+            }
+
+            read_buf = (char *) mmap(0, st.st_size,
+                        PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE,
+                        txtfd, 0);
+
+            if (read_buf == MAP_FAILED) {
+                LOGE("failed to mmap parameters file: %s (%d)",
+                      strerror(errno), errno);
+                close(txtfd);
+            }
+
+            if(read_buf[0] =='0')
+               AUTO_VOLUME_ENABLED = 0;
+
+            munmap(read_buf, st.st_size);
+            close(txtfd);
+        }
+
+        ioctl(m7xsnddriverfd, SND_AVC_CTL, &AUTO_VOLUME_ENABLED);
+        ioctl(m7xsnddriverfd, SND_AGC_CTL, &AUTO_VOLUME_ENABLED);
+#endif
+		close(m7xsnddriverfd);
     }
+	else LOGE("Could not open MSM SND driver.");
 }
 
 AudioHardware::~AudioHardware()
@@ -406,9 +411,9 @@ status_t AudioHardware::setVoiceVolume(float v)
         v = 1.0;
     }
 
-    int vol = lrint(v * 5.0);
+    int vol = lrint(v * 7.0);
     LOGD("setVoiceVolume(%f)\n", v);
-    LOGI("Setting in-call volume to %d (available range is 0 to 5)\n", vol);
+    LOGI("Setting in-call volume to %d (available range is 0 to 7)\n", vol);
 
     Mutex::Autolock lock(mLock);
     set_volume_rpc(SND_DEVICE_CURRENT, SND_METHOD_VOICE, vol);
@@ -491,20 +496,21 @@ status_t AudioHardware::doAudioRouteOrMute(uint32_t device)
 status_t AudioHardware::doRouting(AudioStreamInMSM72xx *input)
 {
     /* currently this code doesn't work without the htc libacoustic */
-    if (!acoustic)
-        return 0;
 
     Mutex::Autolock lock(mLock);
     uint32_t outputDevices = mOutput->devices();
     status_t ret = NO_ERROR;
-    int (*msm72xx_enable_audpp)(int);
-    msm72xx_enable_audpp = (int (*)(int))::dlsym(acoustic, "msm72xx_enable_audpp");
     int audProcess = (ADRC_DISABLE | EQ_DISABLE | RX_IIR_DISABLE);
     int sndDevice = -1;
 
     if (input != NULL) {
         uint32_t inputDevice = input->devices();
         LOGI("do input routing device %x\n", inputDevice);
+        // ignore routing device information when we start a recording in voice
+        // call
+        // Recording will happen through currently active tx device
+        if(inputDevice == AudioSystem::DEVICE_IN_VOICE_CALL)
+            return NO_ERROR;
         if (inputDevice != 0) {
             if (inputDevice & AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET) {
                 LOGI("Routing audio to Bluetooth PCM\n");
@@ -577,11 +583,7 @@ status_t AudioHardware::doRouting(AudioStreamInMSM72xx *input)
 
     if (sndDevice != -1 && sndDevice != mCurSndDevice) {
         ret = doAudioRouteOrMute(sndDevice);
-        if ((*msm72xx_enable_audpp) == 0 ) {
-            LOGE("Could not open msm72xx_enable_audpp()");
-        } else {
-            msm72xx_enable_audpp(audProcess);
-        }
+        msm72xx_enable_audpp(audProcess,sndDevice);
         mCurSndDevice = sndDevice;
     }
 
