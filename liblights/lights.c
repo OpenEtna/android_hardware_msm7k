@@ -466,7 +466,7 @@ static int open_lights(const struct hw_module_t* module, char const* name,
     dev->common.module = (struct hw_module_t*)module;
     dev->common.close = (int (*)(struct hw_device_t*))close_lights;
     dev->set_light = set_light;
-    dev->set_als_mode = set_als_mode;
+    //dev->set_als_mode = set_als_mode;
 
     *device = (struct hw_device_t*)dev;
     return 0;
