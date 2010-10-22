@@ -16,7 +16,7 @@
 
 #include <math.h>
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
 #define LOG_TAG "AudioHardwareMSM72XX"
 #include <utils/Log.h>
 #include <utils/String8.h>
@@ -34,7 +34,7 @@
 #include "AudioHardware.h"
 #include <media/AudioRecord.h>
 
-#define LOG_SND_RPC 0  // Set to 1 to log sound RPC's
+#define LOG_SND_RPC 1  // Set to 1 to log sound RPC's
 
 namespace android {
 static int audpre_index, tx_iir_index;
@@ -579,6 +579,8 @@ status_t AudioHardware::doRouting()
         ret = doAudioRouteOrMute(sndDevice);
         msm72xx_enable_audpp(audProcess,sndDevice);
         mCurSndDevice = sndDevice;
+    } else {
+        LOGI("Not calling doAudioRouteOrMute, %d, %d, %d\n", sndDevice, mCurSndDevice);
     }
 
     return ret;
