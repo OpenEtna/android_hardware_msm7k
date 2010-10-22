@@ -26,6 +26,7 @@ LOCAL_SRC_FILES := copybit.cpp
 LOCAL_MODULE := copybit.msm7k
 LOCAL_C_INCLUDES += hardware/msm7k/libgralloc
 LOCAL_CFLAGS += -DCOPYBIT_MSM7K=1
+LOCAL_CFLAGS += -DCONFIG_MSM_MDP40
 include $(BUILD_SHARED_LIBRARY)
 endif
 
