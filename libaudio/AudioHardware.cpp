@@ -264,6 +264,7 @@ status_t AudioHardware::setMode(int mode)
         // even if the new device selected is the same as current one.
         clearCurDevice();
     }
+
     return status;
 }
 
@@ -504,8 +505,17 @@ status_t AudioHardware::doAudioRouteOrMute(uint32_t device)
         }
     }
     LOGV("doAudioRouteOrMute() device %x, mMode %d, mMicMute %d", device, mMode, mMicMute);
+
+    /**
+     * mMode == AudioSystem::MODE_IN_CALL ? mMicMute : false
+     * is a workaround for a bug on the eve (see issue openetna 134).
+     * Whenever we leave IN_CALL mode, we have to turn the 'microphone' mute.
+     * This does not effect audio recording!
+     * Leaving micMute to false will produce white noise after another sound is played.
+     */
+
     return do_route_audio_rpc(device,
-                              mMode != AudioSystem::MODE_IN_CALL, mMicMute);
+                              mMode != AudioSystem::MODE_IN_CALL, (mMode == AudioSystem::MODE_IN_CALL) ? mMicMute : true);
 }
 
 status_t AudioHardware::doRouting()
@@ -594,8 +604,6 @@ status_t AudioHardware::doRouting()
         ret = doAudioRouteOrMute(sndDevice);
         msm72xx_enable_audpp(audProcess,sndDevice);
         mCurSndDevice = sndDevice;
-    } else {
-        LOGI("Not calling doAudioRouteOrMute, %d, %d, %d\n", sndDevice, mCurSndDevice);
     }
 
     return ret;
