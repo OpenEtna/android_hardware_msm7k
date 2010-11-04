@@ -31,6 +31,7 @@
 #include <sys/types.h>
 
 #include <hardware/lights.h>
+#include "cutils/properties.h"
 
 /******************************************************************************/
 
@@ -42,6 +43,7 @@ static struct light_state_t g_battery;
 static int g_backlight = 255;
 static int g_trackball = -1;
 static int g_buttons = 0;
+static int g_notifications2 = 0;
 static int g_attention = 0;
 static int g_haveAmberLed = 0;
 static int g_wimax = 0;
@@ -214,11 +216,30 @@ static int
 set_light_buttons(struct light_device_t* dev,
         struct light_state_t const* state)
 {
+    LOGV("set_light_buttons color=0x%08x", state->color);
     int err = 0;
     int on = is_lit(state);
+    char enabled[PROPERTY_VALUE_MAX];
+    property_get("persist.sys.notifyled", enabled, "0");
     pthread_mutex_lock(&g_lock);
-    g_buttons = on;
-    err = write_int(BUTTON_FILE, on?255:0);
+    g_buttons = on?255:0;
+    if (on || !g_notifications2 || strcmp(enabled, "1")) err = write_int(BUTTON_FILE, g_buttons);
+    pthread_mutex_unlock(&g_lock);
+    return err;
+}
+
+static int
+set_light_notifications2(struct light_device_t* dev,
+        struct light_state_t const* state)
+{
+    LOGV("set_light_notifications2 color=0x%08x", state->color);
+    int err = 0;
+    int on = is_lit(state);
+    char enabled[PROPERTY_VALUE_MAX];
+    property_get("persist.sys.notifyled", enabled, "0");
+    pthread_mutex_lock(&g_lock);
+    g_notifications2 = on?255:0;
+    if(!g_buttons && (!strcmp(enabled, "1") || !on)) err = write_int(BUTTON_FILE, g_notifications2);
     pthread_mutex_unlock(&g_lock);
     return err;
 }
@@ -451,6 +472,9 @@ static int open_lights(const struct hw_module_t* module, char const* name,
     }
     else if (0 == strcmp(LIGHT_ID_BUTTONS, name)) {
         set_light = set_light_buttons;
+    }
+    else if (0 == strcmp(LIGHT_ID_NOTIFICATIONS, name)) {
+        set_light = set_light_notifications2;
     }
     else {
         return -EINVAL;
