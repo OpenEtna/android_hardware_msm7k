@@ -441,12 +441,12 @@ status_t AudioHardware::setMasterVolume(float v)
     Mutex::Autolock lock(mLock);
     int vol = ceil(v * 5.0);
     LOGI("Set master volume to %d.\n", vol);
-    /*
+
     set_volume_rpc(SND_DEVICE_HANDSET, SND_METHOD_VOICE, vol);
     set_volume_rpc(SND_DEVICE_SPEAKER, SND_METHOD_VOICE, vol);
     set_volume_rpc(SND_DEVICE_BT,      SND_METHOD_VOICE, vol);
     set_volume_rpc(SND_DEVICE_HEADSET, SND_METHOD_VOICE, vol);
-    */
+
     // We return an error code here to let the audioflinger do in-software
     // volume on top of the maximum volume that we set through the SND API.
     // return error - software mixer will handle it
