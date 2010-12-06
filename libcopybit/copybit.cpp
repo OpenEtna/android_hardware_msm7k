@@ -200,7 +200,6 @@ static void set_infos(struct copybit_context_t *dev, struct mdp_blit_req *req) {
     req->alpha = dev->mAlpha;
     req->transp_mask = MDP_TRANSP_NOP;
     req->flags = dev->mFlags /*| MDP_BLEND_FG_PREMULT*/;
-    req->sharpening_strength = 64;
 }
 
 /** copy the bits */
@@ -369,7 +368,7 @@ static int stretch_copybit(
         if (src_rect->l < 0 || src_rect->r > src->w ||
             src_rect->t < 0 || src_rect->b > src->h) {
             // this is always invalid
-            return 0; /* do not spoil the log */
+            return -EINVAL;
         }
 
         if (src->w > MAX_DIMENSION || src->h > MAX_DIMENSION)
