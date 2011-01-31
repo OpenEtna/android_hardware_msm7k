@@ -17,30 +17,51 @@
 #ifndef ANDROID_HARDWARE_QUALCOMM_CAMERA_HARDWARE_H
 #define ANDROID_HARDWARE_QUALCOMM_CAMERA_HARDWARE_H
 
-#include <ui/CameraHardwareInterface.h>
+#include <camera/CameraHardwareInterface.h>
 #include <binder/MemoryBase.h>
 #include <binder/MemoryHeapBase.h>
+#include <utils/threads.h>
 #include <stdint.h>
 
-//extern "C" {
+extern "C" {
 #include <linux/android_pmem.h>
-#include "msm_camera.h"
-//}
+#include <media/msm_camera.h>
+}
 
-#define MSM_CAMERA_CONTROL "/dev/msm_camera0"
+#define MSM_CAMERA_CONTROL "/dev/msm_camera/control0"
 #define JPEG_EVENT_DONE 0 /* guess */
 
 #define CAM_CTRL_SUCCESS 1
 
 #define CAMERA_SET_PARM_DIMENSION 1
+#define CAMERA_SET_PARM_WB 14
+#define CAMERA_SET_PARM_EFFECT 15
+#define CAMERA_SET_PARM_ANTIBANDING 21
 #define CAMERA_STOP_PREVIEW 38
 #define CAMERA_START_PREVIEW 39
 #define CAMERA_EXIT 43
 
+#define CAMERA_SET_PARM_AUTO_FOCUS 13
+#define CAMERA_START_SNAPSHOT 40
+#define CAMERA_STOP_SNAPSHOT 41 /* guess, but likely based on previos ording */
 
-#define CAMERA_START_SNAPSHOT 41 /* orig 40 on donut kernel logs same to be 41 */
-#define CAMERA_STOP_SNAPSHOT 42 /* guess, but likely based on previos ording */
-#if 0
+#define AF_MODE_AUTO 2
+#define CAMERA_AUTO_FOCUS_CANCEL 1 //204
+
+typedef enum
+{
+    CAMERA_WB_MIN_MINUS_1,
+    CAMERA_WB_AUTO = 1,  /* This list must match aeecamera.h */
+    CAMERA_WB_CUSTOM,
+    CAMERA_WB_INCANDESCENT,
+    CAMERA_WB_FLUORESCENT,
+    CAMERA_WB_DAYLIGHT,
+    CAMERA_WB_CLOUDY_DAYLIGHT,
+    CAMERA_WB_TWILIGHT,
+    CAMERA_WB_SHADE,
+    CAMERA_WB_MAX_PLUS_1
+} camera_wb_type;
+
 typedef enum
 {
     CAMERA_RSP_CB_SUCCESS,    /* Function is accepted         */
@@ -59,7 +80,16 @@ typedef enum
     CAMERA_EVT_CB_SNAPSHOT_DONE,/*  Snapshot updated               */
     CAMERA_CB_MAX
 } camera_cb_type;
-#endif
+
+typedef enum
+{
+    CAMERA_ANTIBANDING_OFF,
+    CAMERA_ANTIBANDING_60HZ,
+    CAMERA_ANTIBANDING_50HZ,
+    CAMERA_ANTIBANDING_AUTO,
+    CAMERA_MAX_ANTIBANDING,
+} camera_antibanding_type;
+
 typedef struct
 {
     uint32_t timestamp;  /* seconds since 1/6/1980          */
@@ -109,14 +139,11 @@ struct str_map {
 };
 
 namespace android {
-  unsigned char m4mo_read_8bit( int fd, char category, char byte )  ;
-  void m4mo_write_8bit( int fd, char category, char byte, char value ) ;
 
 class QualcommCameraHardware : public CameraHardwareInterface {
 public:
 
     virtual sp<IMemoryHeap> getPreviewHeap() const;
-    virtual sp<IMemoryHeap> getPreviewHeap(int32_t i) const;
     virtual sp<IMemoryHeap> getRawHeap() const;
     virtual void setCallbacks(notify_callback notify_cb,
                               data_callback data_cb,
@@ -147,7 +174,7 @@ public:
     static sp<CameraHardwareInterface> createInstance();
     static sp<QualcommCameraHardware> getInstance();
 
-    void receivePreviewFrame(struct msm_frame_t *frame);
+    void receivePreviewFrame(struct msm_frame *frame);
     void receiveJpegPicture(void);
     void jpeg_set_location();
     void receiveJpegPictureFragment(uint8_t *buf, uint32_t size);
@@ -162,7 +189,6 @@ private:
     void runAutoFocus();
     bool native_set_dimension (int camfd);
     bool native_jpeg_encode (void);
-    int native_set_cfg(sensor_cfg_t cfgtype, cfg_union_t data);
     bool native_set_parm(cam_ctrl_type type, uint16_t length, void *value);
     bool native_set_dimension(cam_ctrl_dimension_t *value);
     int getParm(const char *parm_str, const str_map *parm_map);
@@ -176,7 +202,6 @@ private:
     static const int kPreviewBufferCount = 4;
     static const int kRawBufferCount = 1;
     static const int kJpegBufferCount = 1;
-    static const int kRawFrameHeaderSize = 0 ;
 
     //TODO: put the picture dimensions in the CameraParameters object;
     CameraParameters mParameters;
@@ -184,12 +209,9 @@ private:
     int mPreviewWidth;
     int mRawHeight;
     int mRawWidth;
-    int mRawHeightC;
-    int mRawWidthC;
     unsigned int frame_size;
     bool mCameraRunning;
     bool mPreviewInitialized;
-    bool mRawInitialized ;
 
     // This class represents a heap which maintains several contiguous
     // buffers.  The heap may be backed by pmem (when pmem_pool contains
@@ -204,12 +226,9 @@ private:
         virtual ~MemPool() = 0;
 
         void completeInitialization();
-	void completeInitializationnew();
-	
         bool initialized() const {
-              return ((mHeapnew[3] != NULL && mHeapnew[3]->base() != MAP_FAILED) ||
-                    (mHeap != NULL && mHeap->base() != MAP_FAILED));        
-	}
+            return mHeap != NULL && mHeap->base() != MAP_FAILED;
+        }
 
         virtual status_t dump(int fd, const Vector<String16>& args) const;
 
@@ -218,8 +237,7 @@ private:
         int mFrameSize;
         int mFrameOffset;
         sp<MemoryHeapBase> mHeap;
-        sp<MemoryHeapBase> mHeapnew[4];
-	sp<MemoryBase> *mBuffers;
+        sp<MemoryBase> *mBuffers;
 
         const char *mName;
     };
@@ -233,39 +251,19 @@ private:
 
     struct PmemPool : public MemPool {
         PmemPool(const char *pmem_pool,
-                 int control_camera_fd, msm_pmem_t pmem_type,
+                 int control_camera_fd, int pmem_type,
                  int buffer_size, int num_buffers,
                  int frame_size, int frame_offset,
-                 const char *name);      
-        PmemPool(const char *pmem_pool,
-                 int control_camera_fd, msm_pmem_t pmem_type,
-                 int buffer_size, int num_buffers,
-                 int frame_size, int frame_offset,
-                 const char *name,
-		 int flag);
+                 const char *name);
         virtual ~PmemPool();
         int mFd;
-        msm_pmem_t mPmemType;
+        int mPmemType;
         int mCameraControlFd;
         uint32_t mAlignedSize;
         struct pmem_region mSize;
-	int ptypeflag ;
     };
-    
-     struct PreviewPmemPool : public PmemPool {
-         virtual ~PreviewPmemPool();
-         PreviewPmemPool(int control_fd, int buffer_size, int num_buffers,
-                         int frame_size,
-                         int frame_offset,
-                         const char *name);
-         PreviewPmemPool(int control_fd, int buffer_size, int num_buffers,
-                         int frame_size,
-                         int frame_offset,
-                         const char *name,
-                         int flag);
-     };
 
-    sp<PreviewPmemPool> mPreviewHeap;
+    sp<PmemPool> mPreviewHeap;
     sp<PmemPool> mThumbnailHeap;
     sp<PmemPool> mRawHeap;
     sp<AshmemPool> mJpegHeap;
@@ -275,15 +273,7 @@ private:
     void deinitPreview();
     bool initRaw(bool initJpegHeap);
     void deinitRaw();
-    
-    void setLensToBasePosition() ;
-    
-    void m4mo_write_8bit( char category, char byte, char value ) ;	    
-    unsigned char m4mo_read_8bit( char category, char byte ) ;
-    void m4mo_get_firmware_version() ;
-    friend void *jpeg_encoder_thread( void *user ) ;
-    void runJpegEncodeThread(void *data) ;
-    
+
     bool mFrameThreadRunning;
     Mutex mFrameThreadWaitLock;
     Condition mFrameThreadWait;
@@ -292,7 +282,7 @@ private:
 
     bool mShutterPending;
     Mutex mShutterLock;
-    
+
     bool mSnapshotThreadRunning;
     Mutex mSnapshotThreadWaitLock;
     Condition mSnapshotThreadWait;
@@ -304,15 +294,12 @@ private:
     void setAntibanding();
     void setEffect();
     void setWhiteBalance();
-    void setSceneMode();
-    void setFlashMode();
 
     Mutex mLock;
     bool mReleasedRecordingFrame;
 
     void receiveRawPicture(void);
 
-    Mutex mAFLock;
 
     Mutex mRecordLock;
     Mutex mRecordFrameLock;
@@ -338,15 +325,13 @@ private:
 
 #if DLOPEN_LIBMMCAMERA
     void *libmmcamera;
-    void *libmmcamera_target;
 #endif
 
     int mCameraControlFd;
     cam_ctrl_dimension_t mDimension;
-    cam_ctrl_dimension_t mDimensionC;
-    
     bool mAutoFocusThreadRunning;
     Mutex mAutoFocusThreadLock;
+    int mAutoFocusFd;
 
     pthread_t mCamConfigThread;
     pthread_t mFrameThread;
@@ -354,7 +339,7 @@ private:
 
     common_crop_t mCrop;
 
-    struct msm_frame_t frames[kPreviewBufferCount];
+    struct msm_frame frames[kPreviewBufferCount];
     bool mInPreviewCallback;
     bool mCameraRecording;
 };
