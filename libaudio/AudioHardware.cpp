@@ -51,22 +51,16 @@ static int msm72xx_enable_audpp(uint16_t enable_mask, uint32_t device) {
 // ----------------------------------------------------------------------------
 
 AudioHardware::AudioHardware() :
-    mInit(false), mMicMute(true), mBluetoothNrec(true), mBluetoothId(0),
+    mInit(false), mMicMute(true),
     mOutput(0), mSndEndpoints(NULL), mCurSndDevice(-1),
     SND_DEVICE_CURRENT(-1),
     SND_DEVICE_HANDSET(-1),
     SND_DEVICE_SPEAKER(-1),
     SND_DEVICE_HEADSET(-1),
     SND_DEVICE_BT(-1),
-    SND_DEVICE_CARKIT(-1),
-    SND_DEVICE_TTY_FULL(-1),
-    SND_DEVICE_TTY_VCO(-1),
-    SND_DEVICE_TTY_HCO(-1),
-    SND_DEVICE_NO_MIC_HEADSET(-1),
     SND_DEVICE_FM_HEADSET(-1),
     SND_DEVICE_HEADSET_AND_SPEAKER(-1),
-    SND_DEVICE_FM_SPEAKER(-1),
-    SND_DEVICE_BT_EC_OFF(-1)
+    SND_DEVICE_FM_SPEAKER(-1)
 {
 
     int m7xsnddriverfd = open("/dev/msm_snd", O_RDWR);
@@ -97,13 +91,7 @@ AudioHardware::AudioHardware() :
         CHECK_FOR(HANDSET)
         CHECK_FOR(SPEAKER)
         CHECK_FOR(BT)
-        CHECK_FOR(BT_EC_OFF)
         CHECK_FOR(HEADSET)
-        CHECK_FOR(CARKIT)
-        CHECK_FOR(TTY_FULL)
-        CHECK_FOR(TTY_VCO)
-        CHECK_FOR(TTY_HCO)
-        CHECK_FOR(NO_MIC_HEADSET)
         CHECK_FOR(FM_HEADSET)
         CHECK_FOR(FM_SPEAKER)
         CHECK_FOR(HEADSET_AND_SPEAKER)
@@ -313,31 +301,9 @@ status_t AudioHardware::setParameters(const String8& keyValuePairs)
 
     if (keyValuePairs.length() == 0) return BAD_VALUE;
 
-    key = String8(BT_NREC_KEY);
-    if (param.get(key, value) == NO_ERROR) {
-        if (value == BT_NREC_VALUE_ON) {
-            mBluetoothNrec = true;
-        } else {
-            mBluetoothNrec = false;
-            LOGI("Turning noise reduction and echo cancellation off for BT "
-                 "headset");
-        }
-    }
     key = String8(BT_NAME_KEY);
     if (param.get(key, value) == NO_ERROR) {
-        mBluetoothId = 0;
-        for (int i = 0; i < mNumSndEndpoints; i++) {
-            if (!strcasecmp(value.string(), mSndEndpoints[i].name)) {
-                mBluetoothId = mSndEndpoints[i].id;
-                LOGI("Using custom acoustic parameters for %s", value.string());
-                break;
-            }
-        }
-        if (mBluetoothId == 0) {
-            LOGI("Using default acoustic parameters "
-                 "(%s not in acoustic database)", value.string());
-            doRouting();
-        }
+		doRouting();
     }
     return NO_ERROR;
 }
@@ -497,13 +463,6 @@ static status_t do_route_audio_rpc(uint32_t device,
 // always call with mutex held
 status_t AudioHardware::doAudioRouteOrMute(uint32_t device)
 {
-    if (device == (uint32_t)SND_DEVICE_BT || device == (uint32_t)SND_DEVICE_CARKIT) {
-        if (mBluetoothId) {
-            device = mBluetoothId;
-        } else if (!mBluetoothNrec) {
-            device = SND_DEVICE_BT_EC_OFF;
-        }
-    }
     LOGV("doAudioRouteOrMute() device %x, mMode %d, mMicMute %d", device, mMode, mMicMute);
 
     /**
@@ -567,12 +526,9 @@ status_t AudioHardware::doRouting()
         }
 
         if (outputDevices &
-            (AudioSystem::DEVICE_OUT_BLUETOOTH_SCO | AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET)) {
+            (AudioSystem::DEVICE_OUT_BLUETOOTH_SCO | AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET | AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT)) {
             LOGI("Routing audio to Bluetooth PCM\n");
             sndDevice = SND_DEVICE_BT;
-        } else if (outputDevices & AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT) {
-            LOGI("Routing audio to Bluetooth PCM\n");
-            sndDevice = SND_DEVICE_CARKIT;
         } else if ((outputDevices & AudioSystem::DEVICE_OUT_WIRED_HEADSET) &&
                    (outputDevices & AudioSystem::DEVICE_OUT_SPEAKER)) {
             LOGI("Routing audio to Wired Headset and Speaker\n");
@@ -585,7 +541,7 @@ status_t AudioHardware::doRouting()
                 audProcess = (ADRC_ENABLE | EQ_ENABLE | RX_IIR_ENABLE);
             } else {
                 LOGI("Routing audio to No microphone Wired Headset (%d,%x)\n", mMode, outputDevices);
-                sndDevice = SND_DEVICE_NO_MIC_HEADSET;
+                sndDevice = SND_DEVICE_HEADSET;
             }
         } else if (outputDevices & AudioSystem::DEVICE_OUT_WIRED_HEADSET) {
             LOGI("Routing audio to Wired Headset\n");
@@ -628,10 +584,6 @@ status_t AudioHardware::dumpInternals(int fd, const Vector<String16>& args)
     snprintf(buffer, SIZE, "\tmInit: %s\n", mInit? "true": "false");
     result.append(buffer);
     snprintf(buffer, SIZE, "\tmMicMute: %s\n", mMicMute? "true": "false");
-    result.append(buffer);
-    snprintf(buffer, SIZE, "\tmBluetoothNrec: %s\n", mBluetoothNrec? "true": "false");
-    result.append(buffer);
-    snprintf(buffer, SIZE, "\tmBluetoothId: %d\n", mBluetoothId);
     result.append(buffer);
     ::write(fd, result.string(), result.size());
     return NO_ERROR;
